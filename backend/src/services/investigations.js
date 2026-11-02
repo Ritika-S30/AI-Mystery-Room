@@ -5,6 +5,7 @@ import Investigation from '../models/Investigation.js';
 import Mystery from '../models/Mystery.js';
 import Suspect from '../models/Suspect.js';
 import { mapGeminiError } from './mysteryGeneration.js';
+import { assertHintAllowance, calculateScore } from '../gameRules.js';
 
 const GUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const answerSchema = {
@@ -46,6 +47,7 @@ function publicInvestigation(investigation) {
     hintsUsed: investigation.hintsUsed,
     accusation: investigation.accusation ? String(investigation.accusation) : null,
     result: investigation.result,
+    score: investigation.score ?? null,
     status: investigation.status,
     completedAt: investigation.completedAt,
     createdAt: investigation.createdAt,
@@ -158,6 +160,12 @@ export async function requestHint({ investigationId, guestId, question = '' }) {
   const investigation = await requireInvestigation(investigationId, guestId);
   requireActive(investigation);
   if (typeof question !== 'string' || question.length > 600) throw new InvestigationError('Questions must be 600 characters or fewer.');
+
+  const caseDifficulty = await Mystery.findById(investigation.mysteryId).select('difficulty');
+  if (!caseDifficulty) throw new InvestigationError('Mystery not found.', 404);
+  if (!assertHintAllowance({ difficulty: caseDifficulty.difficulty, hintsUsed: investigation.hintsUsed })) {
+    throw new InvestigationError(`You have used all ${caseDifficulty.difficulty} case hints.`, 429);
+  }
 
   const normalizedQuestion = question.trim();
   if (asksForTheAnswer(normalizedQuestion)) {
@@ -276,6 +284,11 @@ export async function accuseSuspect({ investigationId, guestId, suspectId }) {
 
   investigation.accusation = suspect._id;
   investigation.result = suspect._id.equals(mystery.solution.culpritSuspectId);
+  investigation.score = calculateScore({
+    difficulty: mystery.difficulty,
+    discoveredClues: investigation.reviewedEvidence.length,
+    hintsUsed: investigation.hintsUsed,
+  });
   investigation.status = 'completed';
   investigation.completedAt = new Date();
   await investigation.save();

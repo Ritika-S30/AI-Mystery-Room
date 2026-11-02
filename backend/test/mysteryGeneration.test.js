@@ -35,29 +35,28 @@ function validEvidence() {
       { key: 'e3', title: 'Key log', type: 'document', content: 'One entry was edited.', relevantAt: '2025-01-01T18:33:00Z', relatedSuspectKeys: ['s1'], relatedLocation: 'Security desk', role: 'decisive_clue', reasoning: 'The edit matches the timeline.' },
       { key: 'e4', title: 'Paint note', type: 'written_statement', content: 'A red mark was seen by the door.', relevantAt: '2025-01-01T18:34:00Z', relatedSuspectKeys: ['s2'], relatedLocation: 'Gallery', role: 'red_herring', reasoning: 'The red paint came from a recent repair.' },
       { key: 'e5', title: 'Visitor list', type: 'document', content: 'Three visitors signed out.', relevantAt: '2025-01-01T18:35:00Z', relatedSuspectKeys: ['s2'], relatedLocation: 'Lobby', role: 'supporting', reasoning: 'The visitor list supports the recorded times.' },
-      { key: 'e6', title: 'Guard note', type: 'written_statement', content: 'The corridor was quiet.', relevantAt: '2025-01-01T18:36:00Z', relatedSuspectKeys: ['s3'], relatedLocation: 'North Hall', role: 'supporting', reasoning: 'The account matches the quiet period.' },
     ],
   };
 }
 
 test('blueprint validator requires a fixed culprit and usable solution', () => {
   const blueprint = validBlueprint();
-  assert.equal(validateBlueprint(blueprint).culpritKey, 's1');
-  assert.throws(() => validateBlueprint({ ...blueprint, culpritKey: 'unknown' }), /culprit/);
+  assert.equal(validateBlueprint(blueprint, 'easy').culpritKey, 's1');
+  assert.throws(() => validateBlueprint({ ...blueprint, culpritKey: 'unknown' }, 'easy'), /culprit/);
 });
 
 test('evidence validator rejects unsupported suspect references', () => {
   const blueprint = validBlueprint();
   const bundle = validEvidence();
-  assert.equal(validateEvidenceBundle(bundle, blueprint).evidence.length, 6);
+  assert.equal(validateEvidenceBundle(bundle, blueprint, 'easy').evidence.length, 5);
   bundle.evidence[0].relatedSuspectKeys = ['not-a-suspect'];
-  assert.throws(() => validateEvidenceBundle(bundle, blueprint), /unknown suspect/);
+  assert.throws(() => validateEvidenceBundle(bundle, blueprint, 'easy'), /unknown suspect/);
 });
 
 test('evidence validator canonicalizes valid ISO date-times', () => {
   const bundle = validEvidence();
   bundle.evidence[1].relevantAt = '2025-06-10T12:30:00-04:00';
-  const normalized = validateEvidenceBundle(bundle, validBlueprint());
+  const normalized = validateEvidenceBundle(bundle, validBlueprint(), 'easy');
   assert.equal(normalized.evidence[1].relevantAt, '2025-06-10T16:30:00.000Z');
 });
 
@@ -69,7 +68,7 @@ test('evidence validator replaces Gemini null and non-ISO timestamps from the ca
     for (const timestamp of problematicValues) {
       const bundle = validEvidence();
       bundle.evidence[0].relevantAt = timestamp;
-      const normalized = validateEvidenceBundle(bundle, validBlueprint());
+      const normalized = validateEvidenceBundle(bundle, validBlueprint(), 'easy');
       assert.equal(normalized.evidence[0].relevantAt, '2025-01-01T18:00:00.000Z');
       for (const evidence of normalized.evidence) {
         assert.match(evidence.relevantAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -77,6 +76,28 @@ test('evidence validator replaces Gemini null and non-ISO timestamps from the ca
     }
   } finally {
     console.warn = originalWarn;
+  }
+});
+
+test('generation validators enforce the exact suspect and clue counts for every difficulty', () => {
+  const expected = { easy: [3, 5], medium: [4, 7], hard: [5, 9] };
+  for (const [difficulty, [suspectCount, clueCount]] of Object.entries(expected)) {
+    const blueprint = validBlueprint();
+    while (blueprint.suspects.length < suspectCount) {
+      const index = blueprint.suspects.length + 1;
+      blueprint.suspects.push({ ...blueprint.suspects[0], key: `s${index}`, name: `Suspect ${index}` });
+    }
+    validateBlueprint(blueprint, difficulty);
+    const bundle = validEvidence();
+    while (bundle.evidence.length < clueCount) {
+      const index = bundle.evidence.length + 1;
+      bundle.evidence.push({ ...bundle.evidence.at(-1), key: `e${index}` });
+    }
+    assert.equal(validateEvidenceBundle(bundle, blueprint, difficulty).evidence.length, clueCount);
+    if (difficulty !== 'easy') {
+      assert.throws(() => validateBlueprint(validBlueprint(), difficulty), /exactly/);
+      assert.throws(() => validateEvidenceBundle(validEvidence(), blueprint, difficulty), /exactly/);
+    }
   }
 });
 

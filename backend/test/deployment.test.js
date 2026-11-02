@@ -60,6 +60,23 @@ test('production CORS allows only configured frontend origins and trusts Render 
   assert.equal(allowed.status, 200);
   assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://mystery-room.example');
 
+  const deployedFrontend = 'https://ai-mystery-room-frontend.onrender.com';
+  const deployed = await fetch(`${base}/api/health`, { headers: { Origin: deployedFrontend } });
+  assert.equal(deployed.status, 200);
+  assert.equal(deployed.headers.get('access-control-allow-origin'), deployedFrontend);
+
+  const preflight = await fetch(`${base}/api/investigations`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: deployedFrontend,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type,x-guest-id',
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), deployedFrontend);
+  assert.match(preflight.headers.get('access-control-allow-headers'), /x-guest-id/i);
+
   const blocked = await fetch(`${base}/api/health`, { headers: { Origin: 'https://localhost:5173' } });
   assert.equal(blocked.status, 200);
   assert.equal(blocked.headers.has('access-control-allow-origin'), false);

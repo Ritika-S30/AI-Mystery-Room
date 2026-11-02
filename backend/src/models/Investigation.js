@@ -32,6 +32,7 @@ const investigationSchema = new mongoose.Schema(
     hintsUsed: { type: Number, min: 0, default: 0 },
     accusation: { type: mongoose.Schema.Types.ObjectId, ref: 'Suspect' },
     result: { type: Boolean, default: null },
+    score: { type: Number, min: 0, default: null },
     status: { type: String, enum: ['active', 'completed'], default: 'active' },
     completedAt: { type: Date },
   },

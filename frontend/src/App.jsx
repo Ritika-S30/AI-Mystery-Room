@@ -2,11 +2,35 @@ import React, { useEffect, useState } from 'react';
 
 // In development, keep API calls same-origin so Vite forwards /api to Express.
 // Production can set an API origin when the frontend and backend are separate.
-const API_BASE = import.meta.env.DEV
-  ? ''
-  : (import.meta.env.VITE_API_BASE_URL?.trim() || '').replace(/\/$/, '');
+function resolveApiBase() {
+  if (import.meta.env.DEV) return { base: '', error: '' };
+
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (!configured) {
+    return {
+      base: '',
+      error: 'The production API URL is missing. Set VITE_API_BASE_URL to your backend Render URL and redeploy the frontend.',
+    };
+  }
+
+  try {
+    const url = new URL(configured);
+    if (url.protocol !== 'https:' || ['localhost', '127.0.0.1', '::1'].includes(url.hostname)) {
+      return { base: '', error: 'VITE_API_BASE_URL must be the public HTTPS URL of the deployed backend.' };
+    }
+    if (url.pathname !== '/' || url.search || url.hash) {
+      return { base: '', error: 'VITE_API_BASE_URL must be the backend origin only, without a path or query.' };
+    }
+    return { base: url.origin, error: '' };
+  } catch {
+    return { base: '', error: 'VITE_API_BASE_URL must be a valid HTTPS backend URL.' };
+  }
+}
+
+const { base: API_BASE, error: API_CONFIG_ERROR } = resolveApiBase();
 const GUEST_KEY = 'mystery-room-guest';
 const ACTIVE_KEY = 'mystery-room-active-investigation';
+const HINT_LIMITS = { easy: 2, medium: 3, hard: 3 };
 
 function getGuestId() {
   let id = localStorage.getItem(GUEST_KEY);
@@ -18,6 +42,7 @@ function getGuestId() {
 }
 
 async function api(path, { guestId, ...options } = {}) {
+  if (API_CONFIG_ERROR) throw new Error(API_CONFIG_ERROR);
   const response = await fetch(`${API_BASE}/api${path}`, {
     ...options,
     headers: {
@@ -241,14 +266,15 @@ function App() {
                 {workspace.investigation.status === 'active' && <form className="stack-form" onSubmit={saveNote}><label htmlFor="note">Add a private note</label><textarea id="note" value={noteText} onChange={(event) => setNoteText(event.target.value)} maxLength={4000} rows="3" placeholder="Record a detail or connection…" required /><select aria-label="Link note to evidence" value={noteEvidence} onChange={(event) => setNoteEvidence(event.target.value)}><option value="">No linked evidence</option>{workspace.evidence.map((item) => <option key={item._id} value={item._id}>{item.title}</option>)}</select><button className="action-button" type="submit">Save note</button></form>}
               </section>
 
-              <section className="panel assistant-panel"><div className="section-heading"><div><p className="eyebrow">REASON IT THROUGH</p><h2>Ask for a hint</h2></div></div><p className="panel-copy">The case assistant can point you toward evidence without naming a culprit.</p>
+              <section className="panel assistant-panel"><div className="section-heading"><div><p className="eyebrow">REASON IT THROUGH</p><h2>Ask for a hint</h2></div></div><p className="panel-copy">The case assistant can point you toward evidence without naming a culprit. {workspace.investigation.hintsUsed} / {HINT_LIMITS[workspace.mystery.difficulty]} hints used.</p>
                 {hint && <blockquote className="hint-answer">{hint}</blockquote>}
-                {workspace.investigation.status === 'active' && <form className="stack-form" onSubmit={askHint}><label htmlFor="question">What are you stuck on? <span>optional</span></label><textarea id="question" value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={600} rows="2" placeholder="Ask about a clue, alibi, or connection…" /><button className="action-button" type="submit">Ask the assistant</button></form>}
+                {workspace.investigation.status === 'active' && workspace.investigation.hintsUsed < HINT_LIMITS[workspace.mystery.difficulty] && <form className="stack-form" onSubmit={askHint}><label htmlFor="question">What are you stuck on? <span>optional</span></label><textarea id="question" value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={600} rows="2" placeholder="Ask about a clue, alibi, or connection…" /><button className="action-button" type="submit">Ask the assistant</button></form>}
               </section>
 
               {workspace.investigation.status === 'active' ? <section className="panel accuse-panel"><p className="eyebrow">YOUR CONCLUSION</p><h2>Make an accusation</h2><p className="panel-copy">Choose the suspect you believe is responsible. The solution will be revealed after you submit.</p><form className="stack-form" onSubmit={makeAccusation}><label htmlFor="accused">I accuse</label><select id="accused" value={accusedId} onChange={(event) => setAccusedId(event.target.value)} required><option value="">Select a suspect</option>{workspace.suspects.map((suspect) => <option key={suspect._id} value={suspect._id}>{suspect.name}</option>)}</select><button className="start-button" type="submit" disabled={!accusedId}>Submit accusation <span aria-hidden="true">↗</span></button></form></section> : <section className={`solution-panel ${workspace.investigation.result ? 'correct' : 'incorrect'}`}>
-                <p className="eyebrow">INVESTIGATION CLOSED</p><h2>{workspace.investigation.result ? 'Correct accusation.' : 'That was not the culprit.'}</h2>
+                <p className="eyebrow">INVESTIGATION CLOSED</p><h2>{workspace.investigation.result ? 'Correct accusation.' : 'That was not the culprit.'}</h2><p className="score-result">Final score: <strong>{workspace.investigation.score ?? 0}</strong> points</p>
                 {solution && <><p className="solution-culprit">The culprit was <strong>{solution.culprit.name}</strong>.</p><h3>Motive</h3><p>{solution.motive}</p><h3>What happened</h3><p>{solution.whatHappened}</p><h3>How the clues connect</h3><p>{solution.explanation}</p><div className="reveal-list"><h3>Important clues</h3>{solution.importantClues.map((clue, index) => <p key={`clue-${index}`}><strong>{clue.evidence?.title}:</strong> {clue.explanation}</p>)}<h3>Red herrings</h3>{solution.redHerrings.map((clue, index) => <p key={`red-${index}`}><strong>{clue.evidence?.title}:</strong> {clue.explanation}</p>)}</div></>}
+                {solution && <button className="text-button" type="button" onClick={goHome}>Start another mystery →</button>}
               </section>}
             </div>
           </div>

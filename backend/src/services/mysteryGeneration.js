@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Evidence from '../models/Evidence.js';
 import Mystery from '../models/Mystery.js';
 import Suspect from '../models/Suspect.js';
+import { DIFFICULTY_RULES } from '../gameRules.js';
 
 const EVIDENCE_TYPES = [
   'chat_message',
@@ -145,8 +146,10 @@ export function validateBlueprint(blueprint, requestedDifficulty = 'medium') {
     requireText(event?.at, `timeline.${index}.at`, 120);
     requireText(event?.event, `timeline.${index}.event`, 1000);
   }
-  if (!Array.isArray(blueprint.suspects) || blueprint.suspects.length < 3 || blueprint.suspects.length > 5) {
-    throw new MysteryGenerationError('Generated case must have 3 to 5 suspects.');
+  const rules = DIFFICULTY_RULES[requestedDifficulty];
+  if (!rules) throw new MysteryGenerationError('Difficulty must be easy, medium, or hard.', 400);
+  if (!Array.isArray(blueprint.suspects) || blueprint.suspects.length !== rules.suspects) {
+    throw new MysteryGenerationError(`${requestedDifficulty} cases must have exactly ${rules.suspects} suspects.`);
   }
   requireUniqueKeys(blueprint.suspects, 'suspect');
   const suspectNames = blueprint.suspects.map(({ name }) => String(name).trim().toLocaleLowerCase());
@@ -172,9 +175,6 @@ export function validateBlueprint(blueprint, requestedDifficulty = 'medium') {
   if (!Array.isArray(solution.redHerringPlan) || solution.redHerringPlan.length < 1) throw new MysteryGenerationError('Solution needs at least one red herring.');
   for (const [index, clue] of solution.cluePlan.entries()) requireText(clue, `solution.cluePlan.${index}`, 1200);
   for (const [index, clue] of solution.redHerringPlan.entries()) requireText(clue, `solution.redHerringPlan.${index}`, 1200);
-  if (requestedDifficulty && !['easy', 'medium', 'hard'].includes(requestedDifficulty)) {
-    throw new MysteryGenerationError('Difficulty must be easy, medium, or hard.', 400);
-  }
   return blueprint;
 }
 
@@ -270,9 +270,11 @@ function timelineFallbackTimestamp(timeline, evidenceIndex, evidenceCount, ancho
   return timestampFromTimelineEvent(timeline[eventIndex], eventIndex, anchorDate);
 }
 
-export function validateEvidenceBundle(bundle, blueprint) {
-  if (!bundle || !Array.isArray(bundle.evidence) || bundle.evidence.length < 6 || bundle.evidence.length > 10) {
-    throw new MysteryGenerationError('Generated case must have 6 to 10 evidence items.');
+export function validateEvidenceBundle(bundle, blueprint, requestedDifficulty = 'medium') {
+  const rules = DIFFICULTY_RULES[requestedDifficulty];
+  if (!rules) throw new MysteryGenerationError('Difficulty must be easy, medium, or hard.', 400);
+  if (!bundle || !Array.isArray(bundle.evidence) || bundle.evidence.length !== rules.clues) {
+    throw new MysteryGenerationError(`${requestedDifficulty} cases must have exactly ${rules.clues} clues.`);
   }
   requireUniqueKeys(bundle.evidence, 'evidence');
   const suspectKeys = new Set(blueprint.suspects.map(({ key }) => key));
@@ -357,15 +359,17 @@ async function generateStructuredJson(client, input, schema) {
 }
 
 function makeBlueprintPrompt(difficulty) {
+  const rules = DIFFICULTY_RULES[difficulty];
   return `Create the planning stage for an original, entirely fictional detective mystery. Difficulty: ${difficulty}.
 Return a self-contained case blueprint in the required JSON format. This stage decides the culprit BEFORE evidence is written. Make exactly one culprit, select culpritKey from the suspect keys, and provide the true motive and complete solution now. Do not put any culprit label in suspect profile fields.
-Create 3 to 5 distinct suspects. Every suspect needs a plausible motive and an alibi; at least two innocent suspects must have believable alternative motives. Write a case that can be solved from concrete evidence, with a fair timeline and at least three distinct planned deductions plus one plausible red herring plan. All details, names, places, and events must be fictional. The scenario must not depend on real crimes or private persons. Do not include graphic violence.
+Create exactly ${rules.suspects} distinct suspects. Every suspect needs a plausible motive and an alibi; innocent suspects must have believable alternative motives. Write a case that can be solved from concrete evidence, with a fair timeline and at least three distinct planned deductions plus one plausible red herring plan. All details, names, places, and events must be fictional. The scenario must not depend on real crimes or private persons. Do not include graphic violence.
 The cluePlan and redHerringPlan are private internal planning notes, not player-facing content. Keep suspect keys short and unique. Use concise but specific prose.`;
 }
 
-function makeEvidencePrompt(blueprint) {
+function makeEvidencePrompt(blueprint, difficulty) {
+  const rules = DIFFICULTY_RULES[difficulty];
   return `Write the evidence for the following fixed case plan. The culprit has already been selected and MUST NOT change. Keep every suspect profile and all evidence factually consistent with this plan. Do not add a culprit label or reveal the solution directly in any evidence or public profile.
-Create 6 to 10 distinct fictional evidence items. At least three must be decisive_clue items that directly support the stored deductions; at least one must be a plausible red_herring that has a clear explanation in the plan; remaining items may be supporting material. The evidence must allow a careful player to distinguish the culprit from every innocent suspect. Avoid contradictions, impossible timing, and clues that require knowledge not supplied in the case. Related suspect keys must come from the plan. relevantAt must be a full ISO-8601 date-time with a date and timezone, such as 2025-01-01T18:00:00Z, or null when no exact timestamp applies. Never return a time-only value such as 23:00:00Z. Include reasoning for each item; reasoning is private and will never be shown before solution reveal.
+Create exactly ${rules.clues} distinct fictional clues/evidence items. At least three must be decisive_clue items that directly support the stored deductions; at least one must be a plausible red_herring that has a clear explanation in the plan; remaining items may be supporting material. The evidence must allow a careful player to distinguish the culprit from every innocent suspect. Avoid contradictions, impossible timing, and clues that require knowledge not supplied in the case. Related suspect keys must come from the plan. relevantAt must be a full ISO-8601 date-time with a date and timezone, such as 2025-01-01T18:00:00Z, or null when no exact timestamp applies. Never return a time-only value such as 23:00:00Z. Include reasoning for each item; reasoning is private and will never be shown before solution reveal.
 
 FIXED CASE PLAN (treat as authoritative):
 ${JSON.stringify(blueprint)}`;
@@ -391,8 +395,9 @@ export async function generateMysteryCase({ difficulty = 'medium' } = {}) {
     difficulty,
   );
   const bundle = validateEvidenceBundle(
-    await generateStructuredJson(client, makeEvidencePrompt(blueprint), evidenceBundleSchema),
+    await generateStructuredJson(client, makeEvidencePrompt(blueprint, difficulty), evidenceBundleSchema),
     blueprint,
+    difficulty,
   );
 
   const suspectIds = new Map(blueprint.suspects.map((suspect) => [suspect.key, new mongoose.Types.ObjectId()]));

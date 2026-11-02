@@ -119,6 +119,8 @@ h1 em { color: var(--acid); }
 .solution-panel h3 { margin: 22px 0 8px; color: var(--acid); font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .solution-culprit { color: #f1eee5 !important; font-size: 16px !important; }
 .solution-culprit strong { color: var(--acid); }
+.score-result { color: #dfe5d4 !important; font-size: 15px !important; }
+.score-result strong { color: var(--acid); }
 .reveal-list { padding-top: 8px; border-top: 1px solid #424a3e; }
 @media (max-width: 850px) {
   .investigation-grid { grid-template-columns: 1fr; }

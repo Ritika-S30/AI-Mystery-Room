@@ -4,7 +4,7 @@ import { createMysteriesRouter } from './routes/mysteries.js';
 import { createInvestigationsRouter } from './routes/investigations.js';
 
 function configuredFrontendOrigins() {
-  return (process.env.FRONTEND_URL || '')
+  const configuredOrigins = (process.env.FRONTEND_URL || '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean)
@@ -16,6 +16,10 @@ function configuredFrontendOrigins() {
       }
     })
     .filter(Boolean);
+  return new Set([
+    'https://ai-mystery-room-frontend.onrender.com',
+    ...configuredOrigins,
+  ]);
 }
 
 function isProductionEnvironment() {
@@ -30,7 +34,7 @@ export function createApp(options = {}) {
   app.set('trust proxy', process.env.RENDER === 'true' ? 1 : 'loopback');
 
   const production = isProductionEnvironment();
-  const allowedOrigins = new Set(configuredFrontendOrigins());
+  const allowedOrigins = configuredFrontendOrigins();
   if (!production) {
     allowedOrigins.add('http://localhost:5173');
     allowedOrigins.add('http://127.0.0.1:5173');
